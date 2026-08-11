@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "PatchWork"
+description = "A mobile-first civic-tech web app for community pothole reporting. Users can see potholes on a live map around their location, report new ones, confirm existing ones (proximity-gated), and explore road condition hotspots by area. Powered by mock data for the initial build."
+version = "1.0.0"
+id = "artifacts/pothole-reporter"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21017
+
+[services.development]
+run = "pnpm --filter @workspace/pothole-reporter run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/pothole-reporter", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/pothole-reporter/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21017"
+BASE_PATH = "/"
