@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: potholes
+    description: Pothole reporting operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /potholes:
+    get:
+      operationId: listPotholes
+      tags: [potholes]
+      summary: List all potholes
+      description: Returns all reported potholes
+      responses:
+        "200":
+          description: List of potholes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pothole"
+    post:
+      operationId: createPothole
+      tags: [potholes]
+      summary: Report a new pothole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePotholeRequest"
+      responses:
+        "201":
+          description: Created pothole
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pothole"
+
+  /potholes/{id}/confirm:
+    post:
+      operationId: confirmPothole
+      tags: [potholes]
+      summary: Confirm an existing pothole
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated pothole
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pothole"
+        "404":
+          description: Pothole not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +95,69 @@ components:
       required:
         - status
 
+    Pothole:
+      type: object
+      properties:
+        id:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        severity:
+          type: string
+          enum: [minor, moderate, severe]
+        status:
+          type: string
+          enum: [reported, confirmed, in-progress, fixed]
+        confirmations:
+          type: number
+        createdAt:
+          type: string
+        streetName:
+          type: string
+        neighborhood:
+          type: string
+        notes:
+          type: string
+      required:
+        - id
+        - lat
+        - lng
+        - severity
+        - status
+        - confirmations
+        - createdAt
+        - streetName
+        - neighborhood
+
+    CreatePotholeRequest:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+        severity:
+          type: string
+          enum: [minor, moderate, severe]
+        notes:
+          type: string
+        streetName:
+          type: string
+        neighborhood:
+          type: string
+      required:
+        - lat
+        - lng
+        - severity
+        - streetName
+        - neighborhood
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

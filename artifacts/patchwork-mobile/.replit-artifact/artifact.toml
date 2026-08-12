@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/patchwork-mobile/"
+title = "PatchWork Mobile"
+description = "A native mobile companion to PatchWork — the civic pothole reporting app. Lets residents report potholes with real GPS, browse nearby reports on an interactive map, and confirm existing reports. Built for use while on the street."
+version = "1.0.0"
+id = "artifacts/patchwork-mobile"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/patchwork-mobile/" ]
+localPort = 18970
+
+[services.development]
+run = "pnpm --filter @workspace/patchwork-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/patchwork-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/patchwork-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "18970"
+BASE_PATH = "/patchwork-mobile/"

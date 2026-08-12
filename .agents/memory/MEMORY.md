@@ -1,0 +1,1 @@
+- [react-native-maps web fix](react-native-maps-web.md) — v1.18.0 crashes on web; stub the full package + codegenNativeCommands in metro.config.js resolver.
