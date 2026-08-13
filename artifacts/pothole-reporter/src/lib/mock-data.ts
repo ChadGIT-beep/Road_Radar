@@ -32,6 +32,10 @@ function randomLng() {
 }
 
 export function generateMockPotholes(count = 50): Pothole[] {
+  // Reset the stream so every call reproduces the same map — otherwise a second
+  // call (e.g. reseeding after storage is cleared) continues the sequence.
+  seed = 1;
+
   const potholes: Pothole[] = [];
   const now = new Date();
 

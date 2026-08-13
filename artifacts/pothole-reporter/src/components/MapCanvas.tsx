@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { motion, useMotionValue, useTransform } from 'framer-motion';
 import { usePotholeStore } from '@/store/PotholeContext';
 import { MAP_CENTER, Pothole } from '@/lib/types';
@@ -16,6 +16,30 @@ function project(lat: number, lng: number) {
   const x = CENTER_OFFSET + (lng - MAP_CENTER.lng) * SCALE;
   const y = CENTER_OFFSET - (lat - MAP_CENTER.lat) * SCALE;
   return { x, y };
+}
+
+// Breathing room kept around the outermost marker when panning, in px.
+const PAN_PADDING = 120;
+
+// Drag range for one axis, in canvas-offset (transform) units.
+// The viewport shows canvas range [-offset, -offset + viewportSize], so keeping the
+// padded data region on screen means:
+//   -offset              >= dataMin - pad   ->  offset <= pad - dataMin
+//   -offset + viewport   <= dataMax + pad   ->  offset >= viewport - dataMax - pad
+// When the viewport is bigger than the whole padded region those bounds invert; there
+// is nothing to pan toward, so allow a little symmetric slack around centre instead.
+function axisBounds(viewportSize: number, dataMin: number, dataMax: number) {
+  const min = viewportSize - dataMax - PAN_PADDING;
+  const max = PAN_PADDING - dataMin;
+
+  if (min <= max) return { min, max };
+
+  const centre = viewportSize / 2 - (dataMin + dataMax) / 2;
+  return { min: centre - PAN_PADDING, max: centre + PAN_PADDING };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 // Severity colours
@@ -38,35 +62,47 @@ interface MapCanvasProps {
 
 export function MapCanvas({ onMarkerClick, selectedId }: MapCanvasProps) {
   const { potholes, currentLocation } = usePotholeStore();
-  const constraintsRef = useRef<HTMLDivElement>(null);
 
   // Initial offset: centre the canvas so the mock user location is in the middle of viewport
   const vw = typeof window !== 'undefined' ? window.innerWidth : 390;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 844;
   const userPos = project(currentLocation.lat, currentLocation.lng);
-  const initX = vw / 2 - userPos.x;
-  const initY = vh / 2 - userPos.y;
+
+  // Numeric constraints, not a ref: the canvas is offset by a transform (`initial`),
+  // so a ref-based boundary gets measured against the already-transformed box and its
+  // relative deltas applied as absolute x/y — snapping the map far off-screen on the
+  // first drag. Bounds are derived from where the markers actually are (a ~360px
+  // spread) rather than the 3000px canvas, so a fling can't strand the user in blank
+  // space with no way back.
+  const dragBounds = useMemo(() => {
+    const xs: number[] = [userPos.x];
+    const ys: number[] = [userPos.y];
+
+    for (const p of potholes) {
+      const { x, y } = project(p.lat, p.lng);
+      xs.push(x);
+      ys.push(y);
+    }
+
+    const x = axisBounds(vw, Math.min(...xs), Math.max(...xs));
+    const y = axisBounds(vh, Math.min(...ys), Math.max(...ys));
+
+    return { left: x.min, right: x.max, top: y.min, bottom: y.max };
+  }, [potholes, userPos.x, userPos.y, vw, vh]);
+
+  // Centre the user in the viewport, but never start outside the drag bounds —
+  // framer-motion would yank an out-of-range offset back on the first drag.
+  const initX = clamp(vw / 2 - userPos.x, dragBounds.left, dragBounds.right);
+  const initY = clamp(vh / 2 - userPos.y, dragBounds.top, dragBounds.bottom);
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-100 dark:bg-slate-900">
       {/* Subtle road-grid background */}
       <div className="absolute inset-0 map-grid pointer-events-none opacity-40 dark:opacity-15" />
 
-      {/* Drag constraint boundary (larger than canvas so drag feels free) */}
-      <motion.div
-        ref={constraintsRef}
-        className="absolute pointer-events-none"
-        style={{
-          width: CANVAS_SIZE + vw,
-          height: CANVAS_SIZE + vh,
-          left: -vw / 2,
-          top: -vh / 2,
-        }}
-      />
-
       <motion.div
         drag
-        dragConstraints={constraintsRef}
+        dragConstraints={dragBounds}
         dragElastic={0.05}
         dragMomentum={true}
         dragTransition={{ bounceStiffness: 200, bounceDamping: 30 }}
@@ -122,41 +158,48 @@ export function MapCanvas({ onMarkerClick, selectedId }: MapCanvasProps) {
             : ICON_MAP[p.severity];
 
           return (
-            <motion.button
+            // Positioning lives on this static wrapper. It must not sit on the
+            // motion.button: framer-motion owns that element's `transform` and would
+            // overwrite the translate, dropping every pin ~250m off its true location.
+            <div
               key={p.id}
-              onClick={e => { e.stopPropagation(); onMarkerClick(p); }}
-              whileHover={{ scale: 1.15, y: -2 }}
-              whileTap={{ scale: 0.92 }}
-              animate={isSelected ? { scale: 1.35, y: -4 } : { scale: 1, y: 0 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 22 }}
-              className={cn(
-                'absolute focus:outline-none origin-bottom',
-                'flex flex-col items-center',
-              )}
+              className="absolute"
               style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -100%)' }}
             >
-              {/* Bubble */}
-              <div className={cn(
-                'relative flex items-center justify-center rounded-full border-2 shadow-md transition-all',
-                cfg.bg, cfg.border, cfg.shadow,
-                isSelected ? 'w-10 h-10 shadow-xl' : 'w-8 h-8',
-                isFixed && 'opacity-55',
-              )}>
-                {icon}
-                {/* Confirmation badge */}
-                {p.confirmations >= 5 && (
-                  <div className="absolute -top-2 -right-2 bg-white dark:bg-slate-900 text-[10px] font-black text-slate-800 dark:text-slate-100 rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center shadow border border-slate-100 dark:border-slate-700 leading-none">
-                    {p.confirmations}
-                  </div>
+              <motion.button
+                onClick={e => { e.stopPropagation(); onMarkerClick(p); }}
+                whileHover={{ scale: 1.15, y: -2 }}
+                whileTap={{ scale: 0.92 }}
+                animate={isSelected ? { scale: 1.35, y: -4 } : { scale: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+                className={cn(
+                  'focus:outline-none origin-bottom',
+                  'flex flex-col items-center',
                 )}
-              </div>
-              {/* Pin tail */}
-              <div className={cn(
-                'w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent',
-                cfg.triangle,
-                isFixed && 'opacity-55',
-              )} />
-            </motion.button>
+              >
+                {/* Bubble */}
+                <div className={cn(
+                  'relative flex items-center justify-center rounded-full border-2 shadow-md transition-all',
+                  cfg.bg, cfg.border, cfg.shadow,
+                  isSelected ? 'w-10 h-10 shadow-xl' : 'w-8 h-8',
+                  isFixed && 'opacity-55',
+                )}>
+                  {icon}
+                  {/* Confirmation badge */}
+                  {p.confirmations >= 5 && (
+                    <div className="absolute -top-2 -right-2 bg-white dark:bg-slate-900 text-[10px] font-black text-slate-800 dark:text-slate-100 rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center shadow border border-slate-100 dark:border-slate-700 leading-none">
+                      {p.confirmations}
+                    </div>
+                  )}
+                </div>
+                {/* Pin tail */}
+                <div className={cn(
+                  'w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent',
+                  cfg.triangle,
+                  isFixed && 'opacity-55',
+                )} />
+              </motion.button>
+            </div>
           );
         })}
       </motion.div>
