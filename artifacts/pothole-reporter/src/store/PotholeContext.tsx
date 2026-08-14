@@ -1,10 +1,13 @@
-import React, { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Pothole, Severity, Status, MAP_CENTER, ReportFormData } from '../lib/types';
 import { generateMockPotholes } from '../lib/mock-data';
+import { reverseGeocode, UNKNOWN_PLACE } from '../lib/geocode';
 
 interface PotholeStore {
   potholes: Pothole[];
   currentLocation: { lat: number; lng: number };
+  /** True while waiting on the first GPS fix. */
+  isLocating: boolean;
   addPothole: (lat: number, lng: number, data: ReportFormData) => void;
   confirmPothole: (id: string) => void;
 }
@@ -33,10 +36,11 @@ function isPothole(value: unknown): value is Pothole {
   );
 }
 
-// Reports live in localStorage so they survive a reload. Anything unreadable or
-// malformed falls back to a fresh seed rather than leaving the map empty.
-function loadPotholes(): Pothole[] {
-  if (typeof window === 'undefined') return generateMockPotholes(SEED_COUNT);
+// Reports live in localStorage so they survive a reload. Returns null when there
+// is nothing usable saved, which tells the provider it is free to seed the demo
+// around the user's real position once GPS reports in.
+function loadStored(): Pothole[] | null {
+  if (typeof window === 'undefined') return null;
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -47,15 +51,56 @@ function loadPotholes(): Pothole[] {
       }
     }
   } catch {
-    // Unreadable storage (disabled, corrupt JSON) — fall through to a fresh seed.
+    // Unreadable storage (disabled, corrupt JSON) — treat as a first run.
   }
 
-  return generateMockPotholes(SEED_COUNT);
+  return null;
 }
 
 export function PotholeProvider({ children }: { children: React.ReactNode }) {
-  const [potholes, setPotholes] = useState<Pothole[]>(loadPotholes);
-  const currentLocation = MAP_CENTER; // Mock user always at center
+  const stored = useRef(loadStored());
+  const [potholes, setPotholes] = useState<Pothole[]>(
+    () => stored.current ?? generateMockPotholes(SEED_COUNT),
+  );
+  const [currentLocation, setCurrentLocation] = useState(MAP_CENTER);
+  const [isLocating, setIsLocating] = useState(
+    typeof navigator !== 'undefined' && 'geolocation' in navigator,
+  );
+
+  // ─── Real GPS ─────────────────────────────────────────────────────────────
+  // The whole trust model rests on this: you may only confirm a pothole you are
+  // physically near. A hardcoded coordinate makes that gate meaningless.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setIsLocating(false);
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      position => {
+        const fix = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setCurrentLocation(fix);
+        setIsLocating(false);
+
+        // First run with no saved data: seed the demo around wherever the user
+        // actually is, so the map is never empty outside San Francisco.
+        if (!stored.current) {
+          stored.current = generateMockPotholes(SEED_COUNT, fix);
+          setPotholes(stored.current);
+        }
+      },
+      () => {
+        // Denied, unavailable, or timed out — fall back to the demo centre.
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   useEffect(() => {
     try {
@@ -66,18 +111,26 @@ export function PotholeProvider({ children }: { children: React.ReactNode }) {
   }, [potholes]);
 
   const addPothole = useCallback((lat: number, lng: number, data: ReportFormData) => {
+    const id = `ph-new-${Date.now()}`;
     const newPothole: Pothole = {
-      id: `ph-new-${Date.now()}`,
+      id,
       lat,
       lng,
       severity: data.severity,
       status: 'reported',
       confirmations: 1,
       createdAt: new Date().toISOString(),
-      streetName: 'Unknown Street',
-      neighborhood: 'Current Location',
+      ...UNKNOWN_PLACE,
     };
     setPotholes(prev => [...prev, newPothole]);
+
+    // Hotspots ranks by street, so a report without a real street name never
+    // reaches the output. Resolve it in the background and patch it in.
+    void reverseGeocode(lat, lng).then(place => {
+      setPotholes(prev =>
+        prev.map(p => (p.id === id ? { ...p, ...place } : p)),
+      );
+    });
   }, []);
 
   const confirmPothole = useCallback((id: string) => {
@@ -96,9 +149,10 @@ export function PotholeProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(() => ({
     potholes,
     currentLocation,
+    isLocating,
     addPothole,
     confirmPothole
-  }), [potholes, currentLocation, addPothole, confirmPothole]);
+  }), [potholes, currentLocation, isLocating, addPothole, confirmPothole]);
 
   return (
     <PotholeContext.Provider value={value}>

@@ -22,16 +22,28 @@ function randomChoice<T>(arr: T[]): T {
   return arr[Math.floor(random() * arr.length)];
 }
 
-function randomLat() {
-  // roughly +/- 1km from center (0.01 deg)
-  return MAP_CENTER.lat + (random() - 0.5) * 0.02;
+function randomLat(centre: Coords) {
+  // roughly +/- 1km from centre (0.01 deg)
+  return centre.lat + (random() - 0.5) * 0.02;
 }
 
-function randomLng() {
-  return MAP_CENTER.lng + (random() - 0.5) * 0.02;
+function randomLng(centre: Coords) {
+  return centre.lng + (random() - 0.5) * 0.02;
 }
 
-export function generateMockPotholes(count = 50): Pothole[] {
+export interface Coords {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Seeded demo data around `centre`.
+ *
+ * The centre is a parameter so the demo works wherever the user actually is —
+ * seeding around a hardcoded San Francisco would hand anyone outside SF an
+ * empty map.
+ */
+export function generateMockPotholes(count = 50, centre: Coords = MAP_CENTER): Pothole[] {
   // Reset the stream so every call reproduces the same map — otherwise a second
   // call (e.g. reseeding after storage is cleared) continues the sequence.
   seed = 1;
@@ -44,8 +56,8 @@ export function generateMockPotholes(count = 50): Pothole[] {
     
     // Create some clusters (hotspots)
     const isCluster = random() > 0.7;
-    let lat = randomLat();
-    let lng = randomLng();
+    let lat = randomLat(centre);
+    let lng = randomLng(centre);
     
     if (isCluster && potholes.length > 0) {
       const base = randomChoice(potholes);
@@ -86,8 +98,8 @@ export function generateMockPotholes(count = 50): Pothole[] {
   // Ensure there's a highly confirmed one near center for demonstration
   potholes[0] = {
     id: 'ph-demo-1',
-    lat: MAP_CENTER.lat + 0.0003, // approx 30m away
-    lng: MAP_CENTER.lng + 0.0002,
+    lat: centre.lat + 0.0003, // approx 38m away
+    lng: centre.lng + 0.0002,
     severity: 'severe',
     status: 'confirmed',
     confirmations: 42,
