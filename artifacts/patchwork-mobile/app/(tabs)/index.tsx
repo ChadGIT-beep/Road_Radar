@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,7 +9,14 @@ import {
   Platform,
   useColorScheme,
 } from 'react-native';
-import MapView, { Marker, Region } from 'react-native-maps';
+import {
+  Map as MapLibreMap,
+  Camera,
+  Marker,
+  GeoJSONSource,
+  Layer,
+  type CameraRef,
+} from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -20,20 +27,22 @@ import {
   type Pothole,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
+import {
+  MAP_STYLE_URL,
+  MAP_STYLE_URL_DARK,
+  USER_ZOOM,
+  CONFIRM_RADIUS_M,
+} from '@/constants/map';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SF_CENTER: Region = {
-  latitude: 37.7749,
-  longitude: -122.4194,
-  latitudeDelta: 0.03,
-  longitudeDelta: 0.03,
-};
+// Fallback view until GPS reports in. MapLibre takes [lng, lat].
+const SF_CENTER: [number, number] = [-122.4194, 37.7749];
 
 const PANEL_HEIGHT = 280;
-const CONFIRM_RADIUS_M = 50;
+const HEAT_SOURCE = 'potholes-heat-src';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +89,8 @@ export default function MapScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const panelAnim = useRef(new Animated.Value(0)).current;
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<CameraRef>(null);
+  const [showHeat, setShowHeat] = useState(false);
 
   // ─── Location ──────────────────────────────────────────────────────────────
 
@@ -99,7 +109,11 @@ export default function MapScreen() {
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const loc = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setUserLocation(loc);
-      mapRef.current?.animateToRegion({ ...loc, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 800);
+      cameraRef.current?.flyTo({
+        center: [loc.longitude, loc.latitude],
+        zoom: USER_ZOOM,
+        duration: 800,
+      });
     })();
   }, []);
 
@@ -145,6 +159,15 @@ export default function MapScreen() {
     confirmMutation.mutate({ id: selectedPothole.id });
   }, [selectedPothole, confirmMutation]);
 
+  const recenter = useCallback(() => {
+    if (!userLocation) return;
+    cameraRef.current?.flyTo({
+      center: [userLocation.longitude, userLocation.latitude],
+      zoom: USER_ZOOM,
+      duration: 600,
+    });
+  }, [userLocation]);
+
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     await refetch();
@@ -175,6 +198,22 @@ export default function MapScreen() {
     distanceToSelected !== null &&
     distanceToSelected <= CONFIRM_RADIUS_M;
 
+  // Fixed potholes are excluded — the heatmap shows outstanding problems, and
+  // +1 keeps a brand-new report with no confirmations visible.
+  const heatShape = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: potholes
+        .filter((p) => p.status !== 'fixed')
+        .map((p) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
+          properties: { weight: p.confirmations + 1 },
+        })),
+    }),
+    [potholes],
+  );
+
   function severityColor(severity: Pothole['severity']): string {
     if (severity === 'severe') return colors.severitySevere;
     if (severity === 'moderate') return colors.severityModerate;
@@ -189,42 +228,75 @@ export default function MapScreen() {
 
   return (
     <View style={styles.container}>
-      <MapView
-        ref={mapRef}
+      <MapLibreMap
         style={StyleSheet.absoluteFill}
-        initialRegion={SF_CENTER}
-        showsUserLocation={Platform.OS !== 'web'}
-        showsMyLocationButton={false}
-        customMapStyle={isDark ? darkMapStyle : []}
+        mapStyle={isDark ? MAP_STYLE_URL_DARK : MAP_STYLE_URL}
+        attributionPosition={{ bottom: 8, right: 8 }}
       >
-        {potholes.map((p) => (
-          <Marker
-            key={p.id}
-            coordinate={{ latitude: p.lat, longitude: p.lng }}
-            onPress={() => selectPothole(p)}
-          >
-            <View
-              style={[
-                styles.markerOuter,
-                {
-                  borderColor: severityColor(p.severity),
-                  backgroundColor:
-                    selectedPothole?.id === p.id
-                      ? severityColor(p.severity)
-                      : 'rgba(255,255,255,0.9)',
-                },
-              ]}
+        <Camera
+          ref={cameraRef}
+          initialViewState={{ center: SF_CENTER, zoom: USER_ZOOM }}
+        />
+
+        {/* Density of unfixed reports, weighted by confirmations. */}
+        {showHeat && (
+          <GeoJSONSource id={HEAT_SOURCE} data={heatShape}>
+            <Layer
+              id="potholes-heat"
+              type="heatmap"
+              paint={{
+                'heatmap-weight': [
+                  'interpolate', ['linear'], ['get', 'weight'],
+                  1, 0.15, 10, 0.6, 40, 1,
+                ],
+                'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 10, 1, 18, 3],
+                'heatmap-color': [
+                  'interpolate', ['linear'], ['heatmap-density'],
+                  0, 'rgba(255,237,160,0)',
+                  0.2, 'rgba(254,217,118,0.55)',
+                  0.4, 'rgba(254,178,76,0.7)',
+                  0.6, 'rgba(253,141,60,0.8)',
+                  0.8, 'rgba(240,59,32,0.88)',
+                  1, 'rgba(189,0,38,0.95)',
+                ],
+                'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 10, 14, 18, 55],
+                'heatmap-opacity': 0.85,
+              }}
+            />
+          </GeoJSONSource>
+        )}
+
+        {!showHeat &&
+          potholes.map((p) => (
+            <Marker
+              key={p.id}
+              id={p.id}
+              lngLat={[p.lng, p.lat]}
+              anchor="bottom"
+              onPress={() => selectPothole(p)}
             >
               <View
                 style={[
-                  styles.markerInner,
-                  { backgroundColor: severityColor(p.severity) },
+                  styles.markerOuter,
+                  {
+                    borderColor: severityColor(p.severity),
+                    backgroundColor:
+                      selectedPothole?.id === p.id
+                        ? severityColor(p.severity)
+                        : 'rgba(255,255,255,0.9)',
+                  },
                 ]}
-              />
-            </View>
-          </Marker>
-        ))}
-      </MapView>
+              >
+                <View
+                  style={[
+                    styles.markerInner,
+                    { backgroundColor: severityColor(p.severity) },
+                  ]}
+                />
+              </View>
+            </Marker>
+          ))}
+      </MapLibreMap>
 
       {/* Loading overlay */}
       {isLoading && (
@@ -248,16 +320,38 @@ export default function MapScreen() {
           <MaterialCommunityIcons name="road-variant" size={20} color={colors.primary} />
           <Text style={[styles.headerTitle, { color: colors.foreground }]}>PatchWork</Text>
         </View>
-        <Pressable
-          onPress={handleRefresh}
-          style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.6 }]}
-        >
-          {isRefreshing ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Ionicons name="refresh" size={20} color={colors.foreground} />
-          )}
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={recenter}
+            accessibilityLabel="Recentre on my location"
+            style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="locate" size={20} color={colors.foreground} />
+          </Pressable>
+          <Pressable
+            onPress={() => setShowHeat((v) => !v)}
+            accessibilityLabel={showHeat ? 'Show pins' : 'Show heatmap'}
+            accessibilityState={{ selected: showHeat }}
+            style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.6 }]}
+          >
+            <MaterialCommunityIcons
+              name={showHeat ? 'map-marker' : 'fire'}
+              size={20}
+              color={showHeat ? colors.primary : colors.foreground}
+            />
+          </Pressable>
+          <Pressable
+            onPress={handleRefresh}
+            accessibilityLabel="Refresh reports"
+            style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.6 }]}
+          >
+            {isRefreshing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Ionicons name="refresh" size={20} color={colors.foreground} />
+            )}
+          </Pressable>
+        </View>
       </View>
 
       {/* Legend */}
@@ -436,24 +530,6 @@ export default function MapScreen() {
 
 // ─── Dark map style (matches dark background #020817) ─────────────────────────
 
-const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#1a2035' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#748aab' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a2035' }] },
-  {
-    featureType: 'administrative.locality',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#d59563' }],
-  },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2c3a55' }] },
-  {
-    featureType: 'road.highway',
-    elementType: 'geometry',
-    stylers: [{ color: '#3a5070' }],
-  },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0d1f33' }] },
-];
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -490,6 +566,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   refreshBtn: { padding: 4 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
 
   legend: {
     position: 'absolute',

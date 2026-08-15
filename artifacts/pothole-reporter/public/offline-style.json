@@ -1,0 +1,12 @@
+{
+  "version": 8,
+  "name": "PatchWork Offline",
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": { "background-color": "#e9eef3" }
+    }
+  ]
+}

@@ -3,9 +3,14 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
-// Web stubs for native-only modules that react-native-maps@1.18.0 imports
+// Web stubs for native-only map modules. MapLibre wraps the native Android/iOS
+// SDKs and has no web implementation; the browser client is
+// artifacts/pothole-reporter, which uses maplibre-gl directly.
 const WEB_STUBS = {
-  'react-native-maps': path.resolve(__dirname, 'stubs/react-native-maps.web.js'),
+  '@maplibre/maplibre-react-native': path.resolve(
+    __dirname,
+    'stubs/maplibre-react-native.web.js'
+  ),
   'react-native/Libraries/Utilities/codegenNativeCommands': path.resolve(
     __dirname,
     'stubs/codegenNativeCommands.js'

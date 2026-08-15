@@ -57,6 +57,6 @@
   },
   "dependencies": {
     "@expo-google-fonts/outfit": "^0.4.3",
-    "react-native-maps": "1.18.0"
+    "@maplibre/maplibre-react-native": "^11.3.6"
   }
 }
