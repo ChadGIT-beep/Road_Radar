@@ -546,10 +546,6 @@ importers:
         version: 3.5.4(zod@3.25.76)
 
   artifacts/pothole-reporter:
-    dependencies:
-      maplibre-gl:
-        specifier: ^6.3.0
-        version: 6.3.0
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -695,6 +691,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 0.545.0(react@19.1.0)
+      maplibre-gl:
+        specifier: ^6.3.0
+        version: 6.3.0
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.1.0(react@19.1.0))(react@19.1.0)

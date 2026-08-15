@@ -17,4 +17,7 @@ expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 20000
+# 20s was not enough to install a large new dependency (maplibre-gl) on a cold
+# store: the hook timed out mid-install and left node_modules missing it, so the
+# dev server failed with "Failed to resolve import".
+timeoutMs = 180000

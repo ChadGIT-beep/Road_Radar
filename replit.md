@@ -72,6 +72,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 - MapLibre heatmaps need `OES_texture_half_float_linear`. Headless Chromium on SwiftShader lacks it, so heatmaps render nothing in CI/containers while working fine on real devices — don't chase it as a bug.
 - `@maplibre/maplibre-react-native` is native-only and needs a **development build** (`expo prebuild`); it does not run in Expo Go. Web is stubbed in `metro.config.js`.
 - MapLibre RN v11 renamed things: `Map` (not `MapView`), `Marker` with `lngLat` (not `coordinate`), `GeoJSONSource` (not `ShapeSource`), `Layer type="heatmap"` (not `HeatmapLayer`), and `Camera` uses `flyTo`/`zoomTo` (no `setCamera`).
+- After pulling changes that add a dependency, run `pnpm install`. `scripts/post-merge.sh` does this automatically, but it is bounded by `timeoutMs` in `.replit` — when that budget is too small the install is cut off part-way and the dev server fails with `Failed to resolve import "<pkg>"` while every older package still resolves. That symptom means a truncated install, not a missing file.
+- Keep `pothole-reporter` deps in `devDependencies`. Everything it needs is build-time (Vite bundles it all), and a lone entry in `dependencies` splits the package across two sections for no benefit.
 - Vaul Drawer needs `portal` wrapping; omitting it causes z-index issues with the map.
 - Do not add leaf workspace packages to root `tsconfig.json` references.
 
