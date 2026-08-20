@@ -1,7 +1,7 @@
 import React from 'react';
 import { usePotholeStore } from '@/store/PotholeContext';
 import { FloatingNav } from '@/components/FloatingNav';
-import { AlertTriangle, MapPin, TrendingUp, CheckCircle2, Flame, Activity } from 'lucide-react';
+import { AlertTriangle, MapPin, TrendingUp, CheckCircle2, Flame, Activity, Loader2, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 
@@ -19,7 +19,7 @@ interface HotspotEntry {
 }
 
 export default function HotspotsPage() {
-  const { potholes } = usePotholeStore();
+  const { potholes, isLoading, hasLoadError } = usePotholeStore();
 
   const hotspots = React.useMemo(() => {
     const map = new Map<string, HotspotEntry>();
@@ -189,8 +189,25 @@ export default function HotspotsPage() {
 
           {hotspots.length === 0 && (
             <div className="text-center py-16 text-slate-400 dark:text-slate-600">
-              <MapPin className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p className="text-sm font-medium">No hotspots detected yet</p>
+              {hasLoadError ? (
+                <>
+                  <WifiOff className="w-10 h-10 mx-auto mb-3 opacity-40 text-red-400" />
+                  <p className="text-sm font-medium text-red-500 dark:text-red-400">
+                    Can't reach the server
+                  </p>
+                  <p className="text-xs mt-1">Rankings will appear once it is back.</p>
+                </>
+              ) : isLoading ? (
+                <>
+                  <Loader2 className="w-10 h-10 mx-auto mb-3 opacity-30 animate-spin" />
+                  <p className="text-sm font-medium">Loading reports…</p>
+                </>
+              ) : (
+                <>
+                  <MapPin className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm font-medium">No hotspots detected yet</p>
+                </>
+              )}
             </div>
           )}
         </div>

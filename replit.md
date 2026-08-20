@@ -19,7 +19,7 @@ A mobile-first civic-tech pothole reporting app. Community members can see road 
 - Maps: MapLibre GL (web) + MapLibre React Native (mobile). Tiles from OpenFreeMap, geocoding from Nominatim — both keyless and free
 - Fonts: Outfit (UI) + Space Mono (data/numbers)
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM (not yet used — app is mock-data only)
+- DB: PostgreSQL + Drizzle ORM (not yet used — the API still keeps potholes in memory)
 - API codegen: Orval (from OpenAPI spec)
 
 ## Where things live
@@ -33,9 +33,8 @@ A mobile-first civic-tech pothole reporting app. Community members can see road 
   - `components/PotholeDetailSheet.tsx` — bottom sheet for selected marker detail + proximity confirm
   - `components/ReportSheet.tsx` — report flow with 50m duplicate-nudge logic
   - `components/FloatingNav.tsx` — pill nav bar (Map / Hotspots)
-  - `store/PotholeContext.tsx` — app state: 50 seeded potholes, add/confirm actions, persisted to localStorage
-  - `lib/mock-data.ts` — 50 seeded mock potholes with clusters, generated around a given centre
-  - `lib/types.ts` — shared types + haversine distance helper
+  - `store/PotholeContext.tsx` — app state on top of the generated API hooks: shared pothole list, GPS, add/confirm, loading and error flags
+  - `lib/types.ts` — aliases of the generated contract types + haversine distance helper
   - `lib/utils/ui-helpers.ts` — severity colour helpers
 - `artifacts/api-server/src/` — Express API server (health + full pothole CRUD/confirm routes)
   - `lib/cors.ts` — CORS allowlist policy (`CORS_ALLOWED_ORIGINS`)
@@ -50,9 +49,10 @@ A mobile-first civic-tech pothole reporting app. Community members can see road 
 - **Real GPS on both clients.** The confirm gate is the app's trust model — you may only confirm a pothole you are physically near — so a hardcoded coordinate makes it meaningless. Web uses `navigator.geolocation.watchPosition`; mobile uses `expo-location`.
 - **All proximity math is client-side** (haversine in `lib/types.ts`): confirm gate at 100m on web, 50m on mobile (`CONFIRM_RADIUS_M`), duplicate-report nudge at 50m. These thresholds still disagree between clients — worth unifying.
 - **Reverse geocoding fills in street names.** Hotspots ranks by street, so a report without one never reaches the app's main output. Web uses Nominatim (`lib/geocode.ts`), mobile uses `expo-location`'s built-in geocoder. Both fall back to 'Unknown Street' rather than losing the report.
-- **Mock data is seeded deterministically** (see `lib/mock-data.ts`) and persisted to `localStorage` under `patchwork.potholes.v1`, so reports and confirmations survive a reload. Unreadable or malformed storage falls back to a fresh seed. The seed is generated around the user's *real* position on first run, so the demo is never empty outside San Francisco. ph-demo-1 sits ~38m away to demonstrate the duplicate nudge on first open.
-- **The web app is still localStorage-only.** The API server implements `GET/POST /api/potholes` and `POST /api/potholes/:id/confirm`, and `patchwork-mobile` already consumes them via `@workspace/api-client-react` — but `pothole-reporter` does not. Until it does, the two clients show different data and the web heatmap reflects only that browser.
-- **No database writes yet** — designed for future expansion with the API server + Drizzle schema.
+- **Both clients share one data layer.** `pothole-reporter` and `patchwork-mobile` both go through the generated hooks in `@workspace/api-client-react` (`useListPotholes`, `useCreatePothole`, `useConfirmPothole`), and both validate against the same `@workspace/api-zod` schemas the server uses. The web app's localStorage store and local mock seed are gone: a report made in one browser is visible in every other one, which is what makes Hotspots mean anything. The server's seed is now the only seed, so a first-run user outside San Francisco sees the SF cluster rather than potholes around them — that goes away when the API gets a database.
+- **The web app degrades loudly, not silently.** An unreachable API leaves the map empty, which looks identical to a city with no potholes. Map and Hotspots both carry explicit loading and "can't reach the server" states instead.
+- **Reverse geocoding happens before the POST**, not after. `streetName` and `neighborhood` are required by the contract, so the old "submit now, patch the name in later" path is gone. A failed lookup still submits with `UNKNOWN_PLACE`.
+- **No database writes yet** — the API keeps potholes in module scope, so every restart re-seeds and each autoscale instance holds its own truth. See `GO-LIVE.md`.
 - **CORS is allowlisted in production, open in development** (`api-server/src/lib/cors.ts`). Requests with no `Origin` — native mobile, curl, server-to-server — always pass, because CORS is a browser mechanism and protects nothing there. An unconfigured production deploy still works: web and API sit on one origin behind Replit's router, and same-origin requests never consult CORS. `credentials` stays off deliberately; the mobile client authenticates with a bearer token, and reflecting an origin with credentials enabled is how CORS mistakes become account takeover. Note this constrains browsers only — it does nothing about the unauthenticated write routes (see `GO-LIVE.md`).
 
 ## Product
@@ -77,6 +77,8 @@ _Populate as you build — explicit user instructions worth remembering across s
   this automatically after a merge, but it used to be capped at 20s in
   `.replit` — far too short for a cold ~1100-package install, so it was killed
   midway and left a broken tree. The cap is now 600s.
+- The web app talks to the API through **relative** URLs (`/api/...`). In production and in the Replit preview that resolves because the platform router puts both on one origin; a bare local `vite dev` relies on the `/api` proxy in `vite.config.ts` (override with `API_PROXY_TARGET`), and a separately hosted API needs `VITE_API_BASE_URL`.
+- **`@types/react` must stay on one version across the workspace.** Expo pins `react: 19.1.0`, so the catalog pins the types to 19.1.x to match. When the catalog said `^19.2.0` the workspace held two copies, and which one pnpm hoisted into `.pnpm/node_modules` depended on how many packages asked for each — deleting an unrelated package flipped it and broke the web typecheck with "two different types with this name exist".
 - `maplibre-gl.css` sets `.maplibregl-map { position: relative }`, which beats Tailwind's `absolute`. A container styled only with `absolute inset-0` collapses to **zero height** and the map renders blank — always give it explicit `h-full w-full`.
 - Never put positioning `transform` on an element a library animates. MapLibre's `anchor: 'bottom'` handles pin placement now; the old hand-rolled canvas had markers silently mis-anchored ~250m because framer-motion overwrote their `translate`.
 - MapLibre heatmaps need `OES_texture_half_float_linear`. Headless Chromium on SwiftShader lacks it, so heatmaps render nothing in CI/containers while working fine on real devices — don't chase it as a bug.

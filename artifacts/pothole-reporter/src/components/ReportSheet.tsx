@@ -2,8 +2,9 @@ import React, { useState, useMemo } from "react";
 import { Drawer } from "vaul";
 import { usePotholeStore } from "@/store/PotholeContext";
 import { getDistanceInMeters } from "@/lib/types";
-import { AlertTriangle, MapPin, Camera, ThumbsUp } from "lucide-react";
+import { AlertTriangle, MapPin, Camera, ThumbsUp, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface ReportSheetProps {
   open: boolean;
@@ -11,7 +12,15 @@ interface ReportSheetProps {
 }
 
 export function ReportSheet({ open, onOpenChange }: ReportSheetProps) {
-  const { potholes, currentLocation, addPothole, confirmPothole } = usePotholeStore();
+  const {
+    potholes,
+    currentLocation,
+    addPothole,
+    confirmPothole,
+    isSubmitting,
+    isConfirming,
+  } = usePotholeStore();
+  const { toast } = useToast();
   const [step, setStep] = useState<'check' | 'form'>('check');
   const [severity, setSeverity] = useState<'minor' | 'moderate' | 'severe'>('moderate');
   const [notes, setNotes] = useState('');
@@ -38,16 +47,33 @@ export function ReportSheet({ open, onOpenChange }: ReportSheetProps) {
     }
   }, [open, nearbyPotholes.length]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Both actions now go to the server — a reverse-geocode then a POST — so the
+  // sheet has to stay open until they land, and say so if they don't.
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    addPothole(currentLocation.lat, currentLocation.lng, { severity, notes });
-    onOpenChange(false);
+    try {
+      await addPothole(currentLocation.lat, currentLocation.lng, { severity, notes });
+      onOpenChange(false);
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: "Couldn't submit your report",
+        description: 'Check your connection and try again.',
+      });
+    }
   };
 
-  const handleConfirmExisting = () => {
-    if (nearest) {
-      confirmPothole(nearest.id);
+  const handleConfirmExisting = async () => {
+    if (!nearest) return;
+    try {
+      await confirmPothole(nearest.id);
       onOpenChange(false);
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: "Couldn't confirm that report",
+        description: 'You are offline, or someone already marked it fixed.',
+      });
     }
   };
 
@@ -75,10 +101,15 @@ export function ReportSheet({ open, onOpenChange }: ReportSheetProps) {
                   <div className="space-y-3">
                     <button 
                       onClick={handleConfirmExisting}
-                      className="w-full bg-primary text-primary-foreground hover:bg-primary/90 py-4 rounded-xl font-bold text-sm transition-transform active:scale-[0.98] flex items-center justify-center gap-2"
+                      disabled={isConfirming}
+                      className="w-full bg-primary text-primary-foreground hover:bg-primary/90 py-4 rounded-xl font-bold text-sm transition-transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
                     >
-                      <ThumbsUp className="w-5 h-5" />
-                      Yes, it's the same one (Confirm)
+                      {isConfirming ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <ThumbsUp className="w-5 h-5" />
+                      )}
+                      {isConfirming ? 'Confirming…' : "Yes, it's the same one (Confirm)"}
                     </button>
                     <button 
                       onClick={() => setStep('form')}
@@ -133,9 +164,11 @@ export function ReportSheet({ open, onOpenChange }: ReportSheetProps) {
 
                     <button 
                       type="submit"
-                      className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-4 rounded-xl font-bold text-[15px] transition-transform active:scale-[0.98] shadow-lg shadow-slate-900/20 dark:shadow-white/20 mt-4"
+                      disabled={isSubmitting}
+                      className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-4 rounded-xl font-bold text-[15px] transition-transform active:scale-[0.98] shadow-lg shadow-slate-900/20 dark:shadow-white/20 mt-4 flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
                     >
-                      Submit Report
+                      {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {isSubmitting ? 'Submitting…' : 'Submit Report'}
                     </button>
                   </div>
                 </form>

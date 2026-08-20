@@ -1,19 +1,16 @@
 import { z } from "zod";
+import type {
+  Pothole as ApiPothole,
+  PotholeSeverity,
+  PotholeStatus,
+} from "@workspace/api-client-react";
 
-export type Severity = "minor" | "moderate" | "severe";
-export type Status = "reported" | "confirmed" | "in-progress" | "fixed";
-
-export interface Pothole {
-  id: string;
-  lat: number;
-  lng: number;
-  severity: Severity;
-  status: Status;
-  confirmations: number;
-  createdAt: string; // ISO string
-  streetName: string;
-  neighborhood: string;
-}
+// The API contract in lib/api-spec/openapi.yaml is the single definition of
+// what a pothole is. These are aliases, not copies — the web app used to keep
+// its own hand-written duplicate, which is how the two clients drifted apart.
+export type Severity = PotholeSeverity;
+export type Status = PotholeStatus;
+export type Pothole = ApiPothole;
 
 export const ReportSchema = z.object({
   severity: z.enum(["minor", "moderate", "severe"]),
@@ -22,10 +19,8 @@ export const ReportSchema = z.object({
 
 export type ReportFormData = z.infer<typeof ReportSchema>;
 
-// Center of our mock map (SF)
+/** Fallback view until GPS reports in. */
 export const MAP_CENTER = { lat: 37.7749, lng: -122.4194 };
-// 1 degree lat ~ 111km. So 0.001 deg ~ 111m.
-// 50 meters is ~ 0.00045 degrees.
 
 // Helper to calculate distance in meters between two coordinates roughly
 export function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -40,5 +35,5 @@ export function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lo
             Math.sin(Δλ/2) * Math.sin(Δλ/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
-  return R * c; 
+  return R * c;
 }

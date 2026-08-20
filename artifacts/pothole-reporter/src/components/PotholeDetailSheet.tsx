@@ -1,7 +1,7 @@
 import React from "react";
 import { Drawer } from "vaul";
 import { Pothole } from "@/lib/types";
-import { ThumbsUp, Clock, MapPin, CheckCircle2, Navigation2 } from "lucide-react";
+import { ThumbsUp, Clock, MapPin, CheckCircle2, Navigation2, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { getSeverityBg } from "@/lib/utils/ui-helpers";
@@ -12,11 +12,11 @@ interface PotholeDetailSheetProps {
   pothole: Pothole | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (id: string) => void;
+  onConfirm: (id: string) => void | Promise<void>;
 }
 
 export function PotholeDetailSheet({ pothole, open, onOpenChange, onConfirm }: PotholeDetailSheetProps) {
-  const { currentLocation } = usePotholeStore();
+  const { currentLocation, isConfirming } = usePotholeStore();
   
   if (!pothole) return null;
 
@@ -104,19 +104,18 @@ export function PotholeDetailSheet({ pothole, open, onOpenChange, onConfirm }: P
                         }
                       </p>
                       <button 
-                        disabled={!isNearby}
-                        onClick={() => {
-                          onConfirm(pothole.id);
-                          onOpenChange(false);
-                        }}
+                        disabled={!isNearby || isConfirming}
+                        onClick={() => { void onConfirm(pothole.id); }}
                         className={cn(
-                          "w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center",
+                          "w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2",
                           isNearby 
                             ? "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98]" 
-                            : "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                            : "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed",
+                          isConfirming && "opacity-60"
                         )}
                       >
-                        Confirm Pothole
+                        {isConfirming && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {isConfirming ? 'Confirming…' : 'Confirm Pothole'}
                       </button>
                     </div>
                   </div>

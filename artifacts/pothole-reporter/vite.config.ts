@@ -83,6 +83,15 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    // Only matters for a bare local `vite dev`. In the Replit preview and in
+    // production the platform router already puts the API on /api of this same
+    // origin, so requests never reach this proxy.
+    proxy: {
+      '/api': {
+        target: process.env.API_PROXY_TARGET ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port,

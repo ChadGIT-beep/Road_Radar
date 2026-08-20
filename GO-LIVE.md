@@ -16,20 +16,38 @@ Everything below was verified against the running app, not inferred.
 
 ## Blockers — must land before real users
 
-(#4 is done on this branch; the rest are open.)
+(#1 and #4 are done on this branch; #2 and #3 are open.)
 
-### 1. The web app is single-player
+### 1. The web app is single-player — ~~blocker~~ **done**
 
-`pothole-reporter` reads and writes `localStorage` only
-(`store/PotholeContext.tsx`, key `patchwork.potholes.v1`). The 50 seeded
-potholes are generated *per browser*, around that browser's own GPS fix. Two
-people open PatchWork and see two unrelated maps; your report is invisible to
-your neighbour, and the Hotspots page ranks nothing but your own session.
+`pothole-reporter` read and wrote `localStorage` only, seeding 50 potholes per
+browser. Two people saw two unrelated maps.
 
-`patchwork-mobile` already talks to the API through
-`@workspace/api-client-react`, so the web client is the odd one out. Port it to
-the same hooks and delete the localStorage seed path (or keep it strictly as an
-offline cache).
+`store/PotholeContext.tsx` now runs on the same generated hooks
+`patchwork-mobile` uses — `useListPotholes`, `useCreatePothole`,
+`useConfirmPothole` from `@workspace/api-client-react` — with writes
+invalidating the shared list. The localStorage cache and `lib/mock-data.ts`
+are gone; the server's seed is the only seed. `lib/types.ts` no longer defines
+its own `Pothole`, it aliases the generated contract type, so the duplicate
+definition that let the clients drift apart is gone too.
+
+Verified with two independent browser contexts: one confirms a pothole, the
+other reloads and sees the count go 313 → 314.
+
+Two consequences worth knowing:
+
+- **The app now needs the API to show anything.** Map and Hotspots have
+  explicit loading and "can't reach the server" states rather than rendering an
+  empty city as though it were a clean one.
+- **The seed is the server's, centred on San Francisco.** The old per-browser
+  seed was generated around the user's real GPS so the demo was never empty
+  anywhere. Real shared data replaces that, which is correct — but until #2
+  gives the API a database, a first-run user outside SF sees a distant cluster
+  rather than potholes around them.
+
+Reverse geocoding moved *before* the POST, because `streetName` and
+`neighborhood` are required by the contract; a failed lookup still submits with
+`UNKNOWN_PLACE` rather than losing the report.
 
 ### 2. Nothing is persisted server-side
 
@@ -99,9 +117,11 @@ API client is unaffected — so it narrows the attack surface without closing it
 
 ### 6. The two clients disagree on the rules
 
-Confirm radius is 100 m on web (`PotholeDetailSheet.tsx:29`) and 50 m on mobile
+Confirm radius is 100 m on web (`PotholeDetailSheet.tsx`) and 50 m on mobile
 (`constants/map.ts`, `CONFIRM_RADIUS_M`). Whichever is right, it should be one
-number, and once #3 is done it should live on the server.
+number, and once #3 is done it should live on the server. The clients now share
+a data layer and a type contract, so this threshold and the 50 m duplicate-report
+nudge are the last pieces of product logic still duplicated by hand.
 
 ### 7. No tests, no CI
 
@@ -133,10 +153,18 @@ strings, and a privacy policy URL.
 
 ## Housekeeping
 
-- `pnpm run build` at the repo root fails unless `PORT` and `BASE_PATH` are set,
-  because `mockup-sandbox`'s vite config throws without them. Replit supplies
-  them on deploy, so this only bites locally — but `mockup-sandbox` is scaffolding
-  and is probably worth deleting.
+- `mockup-sandbox` is deleted. It was Replit's empty component-preview canvas
+  (its generated module map was literally `{}`), not part of the product.
+- Deleting it exposed a latent split: the catalog asked for `@types/react`
+  `^19.2.0` while `patchwork-mobile` pinned `~19.1.10` for Expo, so the
+  workspace carried two copies and *which one pnpm hoisted depended on how many
+  packages voted for each*. Removing one voter flipped it and broke the web
+  app's typecheck with "two different types with this name exist". The catalog
+  now pins 19.1.x to match the pinned `react: 19.1.0`, so there is one copy.
+- `pnpm run build` at the repo root still needs `PORT` and `BASE_PATH`, and
+  `patchwork-mobile`'s build additionally needs a deployment domain
+  (`REPLIT_DEV_DOMAIN` or similar) and network access to Metro. Replit supplies
+  all of these; it only bites locally.
 - The web bundle is now split (`app ~591 kB`, `maplibre ~942 kB`) so a deploy no
   longer invalidates MapLibre in everyone's cache. Further splitting the map
   route behind a dynamic import would cut first paint again.

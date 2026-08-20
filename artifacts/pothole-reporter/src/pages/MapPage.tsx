@@ -5,6 +5,7 @@ import { PotholeDetailSheet } from '@/components/PotholeDetailSheet';
 import { ReportSheet } from '@/components/ReportSheet';
 import { Pothole } from '@/lib/types';
 import { usePotholeStore } from '@/store/PotholeContext';
+import { useToast } from '@/hooks/use-toast';
 import { Plus } from 'lucide-react';
 
 export default function MapPage() {
@@ -13,15 +14,26 @@ export default function MapPage() {
   const [isReportOpen, setIsReportOpen] = useState(false);
   
   const { confirmPothole } = usePotholeStore();
+  const { toast } = useToast();
 
   const handleMarkerClick = (pothole: Pothole) => {
     setSelectedPothole(pothole);
     setIsDetailOpen(true);
   };
 
-  const handleConfirm = (id: string) => {
-    confirmPothole(id);
-    setIsDetailOpen(false);
+  // Confirming is a server round-trip now, so it can fail — a silent no-op
+  // would look identical to success and quietly lose the confirmation.
+  const handleConfirm = async (id: string) => {
+    try {
+      await confirmPothole(id);
+      setIsDetailOpen(false);
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: "Couldn't confirm that report",
+        description: 'You are offline, or someone already marked it fixed.',
+      });
+    }
   };
 
   return (
