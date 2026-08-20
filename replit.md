@@ -67,6 +67,13 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
+- **`Failed to resolve import "maplibre-gl"` (or any other dep) in the Vite
+  overlay almost always means a half-finished install, not a missing package.**
+  The lockfile has it, `node_modules` does not. Run `pnpm install
+  --frozen-lockfile` and restart the dev server. `scripts/post-merge.sh` does
+  this automatically after a merge, but it used to be capped at 20s in
+  `.replit` — far too short for a cold ~1100-package install, so it was killed
+  midway and left a broken tree. The cap is now 600s.
 - `maplibre-gl.css` sets `.maplibregl-map { position: relative }`, which beats Tailwind's `absolute`. A container styled only with `absolute inset-0` collapses to **zero height** and the map renders blank — always give it explicit `h-full w-full`.
 - Never put positioning `transform` on an element a library animates. MapLibre's `anchor: 'bottom'` handles pin placement now; the old hand-rolled canvas had markers silently mis-anchored ~250m because framer-motion overwrote their `translate`.
 - MapLibre heatmaps need `OES_texture_half_float_linear`. Headless Chromium on SwiftShader lacks it, so heatmaps render nothing in CI/containers while working fine on real devices — don't chase it as a bug.
@@ -77,4 +84,5 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Pointers
 
+- `GO-LIVE.md` — what still stands between this and real users (multi-user data, persistence, abuse controls)
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

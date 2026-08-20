@@ -63,6 +63,17 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // MapLibre is ~800kB of the bundle on its own. Splitting it out keeps
+        // it in a separately cacheable chunk instead of forcing a re-download
+        // of the whole app on every deploy — this is a phone-on-mobile-data
+        // app, so first paint budget matters.
+        manualChunks: {
+          maplibre: ['maplibre-gl'],
+        },
+      },
+    },
   },
   server: {
     port,

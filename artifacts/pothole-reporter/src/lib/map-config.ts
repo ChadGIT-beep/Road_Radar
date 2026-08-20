@@ -25,5 +25,10 @@ export const NOMINATIM_URL: string =
 /** Zoom level used when framing the user's own position. */
 export const USER_ZOOM = 15.5;
 
-/** Nominatim asks that every caller identify itself. */
+/**
+ * Nominatim asks that every caller identify itself. Browsers refuse to set
+ * User-Agent on a fetch, so this cannot be applied from the client — it is
+ * here for whatever server-side geocoding proxy replaces the direct public
+ * Nominatim call before launch.
+ */
 export const GEOCODER_USER_AGENT = 'PatchWork/1.0 (civic pothole reporting)';

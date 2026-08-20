@@ -1,4 +1,4 @@
-import { NOMINATIM_URL, GEOCODER_USER_AGENT } from './map-config';
+import { NOMINATIM_URL } from './map-config';
 
 export interface PlaceName {
   streetName: string;
@@ -44,9 +44,14 @@ export async function reverseGeocode(
     `&format=jsonv2&zoom=18&addressdetails=1`;
 
   try {
+    // No User-Agent here on purpose: it is a forbidden header name, so the
+    // browser strips it and logs "Refused to set unsafe header". Nominatim's
+    // usage policy still wants every caller identified — that identification
+    // has to come from a server-side proxy (see GEOCODER_USER_AGENT), which is
+    // also where the self-hosting fix belongs before this takes real traffic.
     const res = await fetch(url, {
       signal,
-      headers: { Accept: 'application/json', 'User-Agent': GEOCODER_USER_AGENT },
+      headers: { Accept: 'application/json' },
     });
     if (!res.ok) return UNKNOWN_PLACE;
 
