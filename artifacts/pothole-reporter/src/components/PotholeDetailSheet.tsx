@@ -6,6 +6,7 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { getSeverityBg } from "@/lib/utils/ui-helpers";
 import { usePotholeStore } from "@/store/PotholeContext";
+import { useAuth } from "@/store/AuthContext";
 import { getDistanceInMeters } from "@/lib/types";
 
 interface PotholeDetailSheetProps {
@@ -17,6 +18,7 @@ interface PotholeDetailSheetProps {
 
 export function PotholeDetailSheet({ pothole, open, onOpenChange, onConfirm }: PotholeDetailSheetProps) {
   const { currentLocation, isConfirming } = usePotholeStore();
+  const { isSignedIn } = useAuth();
   
   if (!pothole) return null;
 
@@ -98,14 +100,21 @@ export function PotholeDetailSheet({ pothole, open, onOpenChange, onConfirm }: P
                         {pothole.confirmations} people confirmed this
                       </h3>
                       <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                        {isNearby 
-                          ? "You're nearby! Confirm this pothole to bump its priority for the city repair team."
-                          : "You must be within 100m to confirm this pothole."
+                        {!isNearby
+                          ? "You must be within 100m to confirm this pothole."
+                          : isSignedIn
+                            ? "You're nearby! Confirm this pothole to bump its priority for the city repair team."
+                            : "You're nearby. Sign in to confirm it — confirmations are tied to an account so one person can't vote twice."
                         }
                       </p>
+                      {/* Distance still gates the button, but being signed out
+                          does not: it turns the button into the invitation to
+                          sign in, so the gate explains itself instead of just
+                          refusing. */}
                       <button 
                         disabled={!isNearby || isConfirming}
                         onClick={() => { void onConfirm(pothole.id); }}
+                        data-testid="confirm-pothole"
                         className={cn(
                           "w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2",
                           isNearby 
@@ -115,7 +124,11 @@ export function PotholeDetailSheet({ pothole, open, onOpenChange, onConfirm }: P
                         )}
                       >
                         {isConfirming && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {isConfirming ? 'Confirming…' : 'Confirm Pothole'}
+                        {isConfirming
+                          ? 'Confirming…'
+                          : isSignedIn
+                            ? 'Confirm Pothole'
+                            : 'Sign in to confirm'}
                       </button>
                     </div>
                   </div>

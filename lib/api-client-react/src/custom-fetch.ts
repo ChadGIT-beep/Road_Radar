@@ -360,7 +360,18 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  const response = await fetch(input, {
+    // The web app authenticates with an httpOnly session cookie. fetch's
+    // default of "same-origin" carries it for the normal deployment (web and
+    // API on one origin) but silently drops it the moment the API is on
+    // another origin — which surfaces as "not signed in" rather than as an
+    // error, and is miserable to diagnose. "include" is explicit about it.
+    // Callers can still override via options.
+    credentials: "include",
+    ...init,
+    method,
+    headers,
+  });
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

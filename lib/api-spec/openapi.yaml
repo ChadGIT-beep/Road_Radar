@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: potholes
     description: Pothole reporting operations
+  - name: auth
+    description: Account and session operations
 paths:
   /healthz:
     get:
@@ -26,6 +28,90 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/signup:
+    post:
+      operationId: signUp
+      tags: [auth]
+      summary: Create an account
+      description: Creates an account and signs the new user in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUpRequest"
+      responses:
+        "201":
+          description: The newly created user, now signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: That email already has an account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: logIn
+      tags: [auth]
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogInRequest"
+      responses:
+        "200":
+          description: The signed-in user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Wrong email or password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logOut
+      tags: [auth]
+      summary: Sign out
+      description: Ends the current session. Safe to call when not signed in.
+      responses:
+        "204":
+          description: Signed out
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Who am I
+      description: >-
+        Returns the signed-in user, or null when the caller is anonymous.
+        Anonymous is a normal answer here, not an error — the app is readable
+        without an account.
+      responses:
+        "200":
+          description: The current user, or null
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
 
   /potholes:
     get:
@@ -59,6 +145,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Pothole"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /potholes/{id}/confirm:
     post:
@@ -78,8 +170,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Pothole"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Pothole not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: You have already confirmed this pothole
           content:
             application/json:
               schema:
@@ -153,6 +257,68 @@ components:
         - severity
         - streetName
         - neighborhood
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - email
+        - displayName
+        - createdAt
+
+    CurrentUser:
+      type: object
+      description: Wrapper so that "nobody is signed in" is a valid 200, not a 401.
+      properties:
+        user:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+      required:
+        - user
+
+    SignUpRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          # Not `format: email`: that makes the generator emit a Zod v4
+          # top-level zod.email(), and this workspace generates against the v3
+          # API. A pattern produces zod.string().regex(...), valid in both.
+          pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 200
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 60
+      required:
+        - email
+        - password
+        - displayName
+
+    LogInRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required:
+        - email
+        - password
 
     ErrorResponse:
       type: object

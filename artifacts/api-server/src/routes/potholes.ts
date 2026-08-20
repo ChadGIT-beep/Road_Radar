@@ -1,159 +1,161 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
+import { desc, eq, sql } from "drizzle-orm";
 import { CreatePotholeBody } from "@workspace/api-zod";
+import {
+  db,
+  potholesTable,
+  confirmationsTable,
+  type Pothole as PotholeRow,
+} from "@workspace/db";
+import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 
-// ─── In-memory store (seeded with realistic SF data) ─────────────────────────
+// How many confirmations promote a freshly reported pothole to "confirmed".
+const CONFIRMATIONS_TO_CONFIRM = 3;
 
-type Severity = "minor" | "moderate" | "severe";
-type Status = "reported" | "confirmed" | "in-progress" | "fixed";
-
-interface Pothole {
-  id: string;
-  lat: number;
-  lng: number;
-  severity: Severity;
-  status: Status;
-  confirmations: number;
-  createdAt: string;
-  streetName: string;
-  neighborhood: string;
-  notes?: string;
-}
-
-const MAP_CENTER = { lat: 37.7749, lng: -122.4194 };
-
-const STREETS = [
-  "Market St", "Mission St", "Valencia St", "Howard St", "Folsom St",
-  "Harrison St", "Bryant St", "Brannan St", "Townsend St", "King St",
-];
-
-const NEIGHBORHOODS = [
-  "SoMa", "Mission District", "Financial District", "Hayes Valley",
-  "Tenderloin", "Civic Center", "Castro", "Dogpatch",
-];
-
-let seed = 1;
-function rng() {
-  const x = Math.sin(seed++) * 10000;
-  return x - Math.floor(x);
-}
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(rng() * arr.length)];
-}
-
-function seedPotholes(count = 50): Pothole[] {
-  const now = Date.now();
-  const items: Pothole[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const isCluster = rng() > 0.7;
-    let lat = MAP_CENTER.lat + (rng() - 0.5) * 0.02;
-    let lng = MAP_CENTER.lng + (rng() - 0.5) * 0.02;
-
-    if (isCluster && items.length > 0) {
-      const base = items[Math.floor(rng() * items.length)];
-      lat = base.lat + (rng() - 0.5) * 0.002;
-      lng = base.lng + (rng() - 0.5) * 0.002;
-    }
-
-    const severities: Severity[] = ["minor", "minor", "moderate", "moderate", "severe"];
-    const statuses: Status[] = ["reported", "confirmed", "confirmed", "in-progress", "fixed"];
-    const severity = pick(severities);
-    const status = pick(statuses);
-    const ageMs = Math.floor(rng() * 72 * 3600 * 1000);
-    let confirmations = 0;
-    if (status !== "reported") {
-      confirmations = Math.floor(rng() * 15) + 1;
-    } else if (ageMs > 12 * 3600 * 1000) {
-      confirmations = Math.floor(rng() * 3);
-    }
-
-    items.push({
-      id: `ph-${1000 + i}`,
-      lat, lng, severity, status, confirmations,
-      createdAt: new Date(now - ageMs).toISOString(),
-      streetName: pick(STREETS),
-      neighborhood: pick(NEIGHBORHOODS),
-    });
-  }
-
-  // Demo hotspot near center
-  items[0] = {
-    id: "ph-demo-1",
-    lat: MAP_CENTER.lat + 0.0003,
-    lng: MAP_CENTER.lng + 0.0002,
-    severity: "severe",
-    status: "confirmed",
-    confirmations: 42,
-    createdAt: new Date(now - 2 * 24 * 3600 * 1000).toISOString(),
-    streetName: "Market St",
-    neighborhood: "Civic Center",
+/**
+ * Shape a database row the way the OpenAPI contract describes it.
+ *
+ * `createdAt` becomes an ISO string and `reportedBy` is dropped: who filed a
+ * report is not part of the public contract, and the map is public.
+ */
+function toApiPothole(row: PotholeRow) {
+  return {
+    id: row.id,
+    lat: row.lat,
+    lng: row.lng,
+    severity: row.severity,
+    status: row.status,
+    confirmations: row.confirmations,
+    createdAt: row.createdAt.toISOString(),
+    streetName: row.streetName,
+    neighborhood: row.neighborhood,
+    ...(row.notes ? { notes: row.notes } : {}),
   };
-
-  return items;
 }
-
-const potholes: Pothole[] = seedPotholes();
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-router.get("/potholes", (_req, res) => {
-  res.json(potholes);
+// Public. Anyone can see every pothole without an account — that is the point
+// of the app, and the reason auth guards only the two routes below.
+router.get("/potholes", (_req, res, next) => {
+  void (async () => {
+    const rows = await db
+      .select()
+      .from(potholesTable)
+      .orderBy(desc(potholesTable.createdAt));
+    res.json(rows.map(toApiPothole));
+  })().catch(next);
 });
 
-router.post("/potholes", (req, res) => {
-  const parsed = CreatePotholeBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.errors.map((e) => e.message).join(", ") });
-    return;
-  }
+router.post("/potholes", requireAuth, (req, res, next) => {
+  void (async () => {
+    const parsed = CreatePotholeBody.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: parsed.error.issues.map((e) => e.message).join(", ") });
+      return;
+    }
 
-  const { lat, lng, severity, notes, streetName, neighborhood } = parsed.data;
+    const { lat, lng, severity, notes, streetName, neighborhood } = parsed.data;
 
-  // Reject clearly invalid coordinates (non-finite or off-world)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    res.status(400).json({ error: "Coordinates out of valid range" });
-    return;
-  }
+    // Reject clearly invalid coordinates (non-finite or off-world)
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lng) > 180
+    ) {
+      res.status(400).json({ error: "Coordinates out of valid range" });
+      return;
+    }
 
-  const pothole: Pothole = {
-    id: `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    lat,
-    lng,
-    severity,
-    status: "reported",
-    confirmations: 0,
-    createdAt: new Date().toISOString(),
-    streetName,
-    neighborhood,
-    notes,
-  };
+    const [row] = await db
+      .insert(potholesTable)
+      .values({
+        id: randomUUID(),
+        lat,
+        lng,
+        severity,
+        status: "reported",
+        confirmations: 0,
+        streetName,
+        neighborhood,
+        notes: notes ?? null,
+        // requireAuth guarantees req.user, so the report always has an author.
+        reportedBy: req.user!.id,
+      })
+      .returning();
 
-  potholes.unshift(pothole);
-  res.status(201).json(pothole);
+    if (!row) throw new Error("Failed to insert pothole");
+    res.status(201).json(toApiPothole(row));
+  })().catch(next);
 });
 
-router.post("/potholes/:id/confirm", (req, res) => {
-  const { id } = req.params;
-  const pothole = potholes.find((p) => p.id === id);
+router.post<{ id: string }>("/potholes/:id/confirm", requireAuth, (req, res, next) => {
+  void (async () => {
+    // Express 5 types a path param as string | string[], because a repeated
+    // param produces an array. This route has exactly one, so pin it here
+    // rather than coercing at each of the three uses below.
+    const { id } = req.params;
+    const userId = req.user!.id;
 
-  if (!pothole) {
-    res.status(404).json({ error: "Pothole not found" });
-    return;
-  }
+    const [pothole] = await db
+      .select()
+      .from(potholesTable)
+      .where(eq(potholesTable.id, id))
+      .limit(1);
 
-  if (pothole.status === "fixed") {
-    res.status(400).json({ error: "Cannot confirm a pothole that has already been fixed" });
-    return;
-  }
+    if (!pothole) {
+      res.status(404).json({ error: "Pothole not found" });
+      return;
+    }
 
-  pothole.confirmations += 1;
-  if (pothole.status === "reported" && pothole.confirmations >= 3) {
-    pothole.status = "confirmed";
-  }
+    if (pothole.status === "fixed") {
+      res
+        .status(400)
+        .json({ error: "Cannot confirm a pothole that has already been fixed" });
+      return;
+    }
 
-  res.json(pothole);
+    // One confirmation per person per pothole, enforced by the composite
+    // primary key rather than by a read-then-write that two concurrent
+    // requests could both pass. ON CONFLICT DO NOTHING makes a repeat
+    // confirmation a no-op instead of an error, and the empty `returning()`
+    // is how we know it was a repeat.
+    const inserted = await db
+      .insert(confirmationsTable)
+      .values({ potholeId: id, userId })
+      .onConflictDoNothing()
+      .returning({ potholeId: confirmationsTable.potholeId });
+
+    if (inserted.length === 0) {
+      res.status(409).json({ error: "You have already confirmed this pothole" });
+      return;
+    }
+
+    // Increment from the column's own value rather than from the count we read
+    // a moment ago, so simultaneous confirmations cannot overwrite each other.
+    const [updated] = await db
+      .update(potholesTable)
+      .set({
+        confirmations: sql`${potholesTable.confirmations} + 1`,
+        status: sql`CASE
+          WHEN ${potholesTable.status} = 'reported'
+           AND ${potholesTable.confirmations} + 1 >= ${CONFIRMATIONS_TO_CONFIRM}
+          THEN 'confirmed'
+          ELSE ${potholesTable.status}
+        END`,
+      })
+      .where(eq(potholesTable.id, id))
+      .returning();
+
+    if (!updated) throw new Error("Failed to update pothole");
+    res.json(toApiPothole(updated));
+  })().catch(next);
 });
 
 export default router;

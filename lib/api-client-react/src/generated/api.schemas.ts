@@ -59,6 +59,43 @@ export interface CreatePotholeRequest {
   neighborhood: string;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  displayName: string;
+  createdAt: string;
+}
+
+/**
+ * Wrapper so that "nobody is signed in" is a valid 200, not a 401.
+ */
+export interface CurrentUser {
+  user: User | null;
+}
+
+export interface SignUpRequest {
+  /**
+     * @maxLength 254
+     * @pattern ^[^@\s]+@[^@\s]+\.[^@\s]+$
+     */
+  email: string;
+  /**
+     * @minLength 8
+     * @maxLength 200
+     */
+  password: string;
+  /**
+     * @minLength 1
+     * @maxLength 60
+     */
+  displayName: string;
+}
+
+export interface LogInRequest {
+  email: string;
+  password: string;
+}
+
 export interface ErrorResponse {
   error: string;
 }

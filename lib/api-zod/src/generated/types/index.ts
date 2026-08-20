@@ -8,8 +8,12 @@
 
 export * from './createPotholeRequest';
 export * from './createPotholeRequestSeverity';
+export * from './currentUser';
 export * from './errorResponse';
 export * from './healthStatus';
+export * from './logInRequest';
 export * from './pothole';
 export * from './potholeSeverity';
 export * from './potholeStatus';
+export * from './signUpRequest';
+export * from './user';

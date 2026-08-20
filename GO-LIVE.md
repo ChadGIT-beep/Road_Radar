@@ -1,6 +1,7 @@
 # PatchWork — go-live readiness
 
-Status as of this branch: **the demo is solid, the product is not yet multi-user.**
+Status as of this branch: **all four launch blockers are closed.** What remains
+is hardening and product decisions, not architecture.
 Everything below was verified against the running app, not inferred.
 
 ## What is already working
@@ -10,13 +11,17 @@ Everything below was verified against the running app, not inferred.
   detail sheet and the Hotspots ranking all render on a real device viewport.
 - Tile failures degrade gracefully — the app shows "Map tiles unavailable —
   reports still work" and keeps the markers.
-- `api-server` starts and answers `GET /api/healthz`, `GET /api/potholes`,
-  `POST /api/potholes` (with Zod validation and a coordinate sanity check) and
-  `POST /api/potholes/:id/confirm` (404s an unknown id, refuses a fixed one).
+- `api-server` runs on Postgres and answers `GET /api/healthz`, the four
+  `/api/auth/*` routes, `GET /api/potholes` (public), and the two write routes
+  (session required, Zod-validated, coordinate sanity check, 404 on an unknown
+  id, refusal on a fixed one).
+- Sign up, sign in, sign out and the write gates all work through the browser
+  against a real database.
 
 ## Blockers — must land before real users
 
-(#1 and #4 are done on this branch; #2 and #3 are open.)
+(All four are done on this branch. #3 is closed for the paths that matter;
+see the note there on what is still worth adding.)
 
 ### 1. The web app is single-player — ~~blocker~~ **done**
 
@@ -49,30 +54,54 @@ Reverse geocoding moved *before* the POST, because `streetName` and
 `neighborhood` are required by the contract; a failed lookup still submits with
 `UNKNOWN_PLACE` rather than losing the report.
 
-### 2. Nothing is persisted server-side
+### 2. Nothing is persisted server-side — ~~blocker~~ **done**
 
-`api-server/src/routes/potholes.ts` holds `const potholes: Pothole[]` in module
-scope and re-seeds on every process start. The deployment target is `autoscale`,
-so that means several instances each holding a different truth, and every report
-lost on the next cold start. `lib/db/src/schema/index.ts` is still the empty
-template — the Drizzle wiring exists but no table does.
+The routes ran off a module-scope array that re-seeded on every process start,
+so on an `autoscale` target each instance held a different truth and every
+report died at the next cold start.
 
-Needs: a `potholes` table, Drizzle queries behind the existing routes, and a
-provisioned `DATABASE_URL`.
+`lib/db/src/schema/` now defines four tables — `users`, `sessions`, `potholes`,
+`confirmations` — and the pothole routes are Drizzle queries. The demo seed
+runs only against an empty table, so a deploy no longer duplicates it.
 
-### 3. Anyone can forge the data
+Verified against a real Postgres: 52 potholes and 4 users survived an API
+restart, and the restarted process did not re-seed.
 
-- Both write routes are unauthenticated and unrate-limited.
-- `POST /potholes/:id/confirm` just increments a counter — one caller in a
-  `curl` loop can push any street to the top of Hotspots.
-- The proximity gate ("you may only confirm a pothole you are standing near")
-  is **client-side only**. The server never sees the confirmer's location, so
-  the app's entire trust model is decorative against anyone using the API
-  directly.
+**This needs a provisioned database.** `DATABASE_URL` must be set, and
+`pnpm --filter @workspace/db push` run once, or the API will not start.
 
-Minimum: identity (even anonymous device tokens), per-device rate limits,
-one-confirm-per-device-per-pothole, and move the distance check server-side by
-sending the confirmer's coordinates with the request.
+### 3. Anyone can forge the data — ~~blocker~~ **mostly done**
+
+Reads stay public — the map and the ranking are the product, and they need no
+account. Both *writes* now require a session:
+
+- `POST /potholes` and `POST /potholes/:id/confirm` return 401 to anonymous
+  callers. Reports are attributed to their author.
+- **The ballot-stuffing hole is closed.** `confirmations` has a composite
+  primary key of (pothole, user), so one person can confirm a given pothole
+  exactly once — enforced by the database, not by a check a client could skip.
+  Verified: a `curl` loop of eleven confirmations moved the count by one, and a
+  second account could still add its own.
+- Passwords are scrypt-hashed (`N=16384, r=8, p=1`) with the cost parameters
+  stored alongside each hash, so they can be raised later without invalidating
+  existing passwords. Sessions are httpOnly `SameSite=Lax` cookies; the
+  database stores only a SHA-256 of the token, so a leaked `sessions` table
+  hands over nothing usable.
+- Login answers "Wrong email or password" identically for an unknown account
+  and a bad password, and burns matching time on the unknown-account path so
+  it cannot be used to enumerate registered emails.
+
+Still worth adding:
+
+- **Rate limiting.** Nothing throttles signup or login, so password guessing
+  and account-farming are both open. This is the next thing to fix.
+- **Email verification.** An address is never confirmed, so accounts are cheap
+  to mint in bulk — which weakens one-confirm-per-user by exactly as much as
+  bulk signup is easy.
+- **The proximity gate is still client-side.** The server does not check where
+  a confirmer is standing, so a direct API client can confirm a pothole from
+  anywhere. Sending the confirmer's coordinates and checking the distance
+  server-side is what makes that gate real.
 
 ### 4. CORS is fully open — ~~blocker~~ **done**
 

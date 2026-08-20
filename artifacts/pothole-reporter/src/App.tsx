@@ -12,6 +12,7 @@ import {
   Router as WouterRouter,
 } from 'wouter';
 
+import { AuthProvider } from '@/store/AuthContext';
 import { PotholeProvider } from '@/store/PotholeContext';
 import MapPage from '@/pages/MapPage';
 import HotspotsPage from '@/pages/HotspotsPage';
@@ -55,12 +56,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <PotholeProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-            <Router />
-          </WouterRouter>
-          <Toaster />
-        </PotholeProvider>
+        <AuthProvider>
+          <PotholeProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+              <Router />
+            </WouterRouter>
+            <Toaster />
+          </PotholeProvider>
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

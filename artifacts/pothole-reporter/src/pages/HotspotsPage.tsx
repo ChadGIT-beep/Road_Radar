@@ -1,6 +1,8 @@
 import React from 'react';
 import { usePotholeStore } from '@/store/PotholeContext';
 import { FloatingNav } from '@/components/FloatingNav';
+import { AuthButton } from '@/components/AuthButton';
+import { AuthSheet } from '@/components/AuthSheet';
 import { AlertTriangle, MapPin, TrendingUp, CheckCircle2, Flame, Activity, Loader2, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
@@ -20,6 +22,7 @@ interface HotspotEntry {
 
 export default function HotspotsPage() {
   const { potholes, isLoading, hasLoadError } = usePotholeStore();
+  const [isAuthOpen, setIsAuthOpen] = React.useState(false);
 
   const hotspots = React.useMemo(() => {
     const map = new Map<string, HotspotEntry>();
@@ -63,15 +66,20 @@ export default function HotspotsPage() {
     <div className="min-h-[100dvh] w-full bg-slate-50 dark:bg-slate-950 pb-32">
       {/* Sticky header */}
       <div className="px-5 pt-14 pb-5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md sticky top-0 z-10 border-b border-slate-100 dark:border-slate-800">
-        <div className="flex items-center gap-2 mb-1">
-          <Flame className="w-5 h-5 text-red-500" />
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            City Hotspots
-          </h1>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Flame className="w-5 h-5 text-red-500" />
+              <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                City Hotspots
+              </h1>
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
+              Streets ranked by community-reported severity
+            </p>
+          </div>
+          <AuthButton onSignInClick={() => setIsAuthOpen(true)} className="mt-1" />
         </div>
-        <p className="text-slate-500 dark:text-slate-400 text-sm">
-          Streets ranked by community-reported severity
-        </p>
       </div>
 
       <div className="px-4 py-5 space-y-6">
@@ -214,6 +222,8 @@ export default function HotspotsPage() {
       </div>
 
       <FloatingNav />
+
+      <AuthSheet open={isAuthOpen} onOpenChange={setIsAuthOpen} />
     </div>
   );
 }

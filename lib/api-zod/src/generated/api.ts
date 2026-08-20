@@ -18,6 +18,72 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Creates an account and signs the new user in.
+ * @summary Create an account
+ */
+export const signUpBodyEmailMax = 254;
+
+
+export const signUpBodyEmailRegExp = new RegExp('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+export const signUpBodyPasswordMin = 8;
+export const signUpBodyPasswordMax = 200;
+
+export const signUpBodyDisplayNameMax = 60;
+
+
+
+export const SignUpBody = zod.object({
+  "email": zod.string().max(signUpBodyEmailMax).regex(signUpBodyEmailRegExp),
+  "password": zod.string().min(signUpBodyPasswordMin).max(signUpBodyPasswordMax),
+  "displayName": zod.string().min(1).max(signUpBodyDisplayNameMax)
+})
+
+export const SignUpResponse = zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "displayName": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Sign in
+ */
+export const LogInBody = zod.object({
+  "email": zod.string(),
+  "password": zod.string()
+})
+
+export const LogInResponse = zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "displayName": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * Ends the current session. Safe to call when not signed in.
+ * @summary Sign out
+ */
+export const LogOutResponse = zod.void()
+
+
+/**
+ * Returns the signed-in user, or null when the caller is anonymous. Anonymous is a normal answer here, not an error — the app is readable without an account.
+ * @summary Who am I
+ */
+export const GetCurrentUserResponse = zod.object({
+  "user": zod.union([zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "displayName": zod.string(),
+  "createdAt": zod.string()
+}),zod.null()])
+}).describe('Wrapper so that \"nobody is signed in\" is a valid 200, not a 401.')
+
+
+/**
  * Returns all reported potholes
  * @summary List all potholes
  */

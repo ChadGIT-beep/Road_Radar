@@ -106,10 +106,16 @@ export function buildCorsOptions(): CorsOptions {
     // PUT, PATCH or DELETE yet.
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Accept", "Authorization", "Content-Type"],
-    // No cookie auth today, and reflecting an origin with credentials enabled
-    // is how CORS misconfigurations turn into account takeover. The mobile
-    // client sends a bearer token, which needs no credentials mode.
-    credentials: false,
+    // Sessions are httpOnly cookies now, so a cross-origin browser client has
+    // to be allowed to send them. This is exactly the combination that turns a
+    // sloppy allowlist into account takeover, which is why `origin` above never
+    // reflects an arbitrary origin in production — only names on the list get
+    // headers back. In development it does reflect anything, so do not point a
+    // development build at production data.
+    //
+    // The default deployment does not rely on this at all: web and API share
+    // one origin, and same-origin requests carry cookies without CORS.
+    credentials: true,
     maxAge: 86_400,
   };
 }

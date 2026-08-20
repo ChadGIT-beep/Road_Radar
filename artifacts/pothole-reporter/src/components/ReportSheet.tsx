@@ -68,12 +68,27 @@ export function ReportSheet({ open, onOpenChange }: ReportSheetProps) {
     try {
       await confirmPothole(nearest.id);
       onOpenChange(false);
-    } catch {
+    } catch (error) {
+      // This sheet is only reachable when signed in, so 409 (already
+      // confirmed) is the failure worth naming — telling someone to "check
+      // their connection" when they simply confirmed it yesterday is worse
+      // than saying nothing.
+      const status =
+        error && typeof error === 'object'
+          ? (error as { status?: number }).status
+          : undefined;
       toast({
         variant: 'destructive',
-        title: "Couldn't confirm that report",
-        description: 'You are offline, or someone already marked it fixed.',
+        title:
+          status === 409
+            ? 'You have already confirmed this one'
+            : "Couldn't confirm that report",
+        description:
+          status === 409
+            ? 'Each person can confirm a pothole once.'
+            : 'You are offline, or someone already marked it fixed.',
       });
+      if (status === 409) onOpenChange(false);
     }
   };
 
