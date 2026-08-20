@@ -1,25 +1,11 @@
 import { Router, type IRouter } from "express";
+import { eq } from "drizzle-orm";
 import { CreatePotholeBody } from "@workspace/api-zod";
+import { db, potholesTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
-// ─── In-memory store (seeded with realistic SF data) ─────────────────────────
-
-type Severity = "minor" | "moderate" | "severe";
-type Status = "reported" | "confirmed" | "in-progress" | "fixed";
-
-interface Pothole {
-  id: string;
-  lat: number;
-  lng: number;
-  severity: Severity;
-  status: Status;
-  confirmations: number;
-  createdAt: string;
-  streetName: string;
-  neighborhood: string;
-  notes?: string;
-}
+// ─── Seed data helpers ────────────────────────────────────────────────────────
 
 const MAP_CENTER = { lat: 37.7749, lng: -122.4194 };
 
@@ -42,17 +28,21 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(rng() * arr.length)];
 }
 
-function seedPotholes(count = 50): Pothole[] {
+type Severity = "minor" | "moderate" | "severe";
+type Status = "reported" | "confirmed" | "in-progress" | "fixed";
+
+function buildSeedRows(count = 50) {
+  seed = 1; // reset for reproducibility
   const now = Date.now();
-  const items: Pothole[] = [];
+  const rows: (typeof potholesTable.$inferInsert)[] = [];
 
   for (let i = 0; i < count; i++) {
     const isCluster = rng() > 0.7;
     let lat = MAP_CENTER.lat + (rng() - 0.5) * 0.02;
     let lng = MAP_CENTER.lng + (rng() - 0.5) * 0.02;
 
-    if (isCluster && items.length > 0) {
-      const base = items[Math.floor(rng() * items.length)];
+    if (isCluster && rows.length > 0) {
+      const base = rows[Math.floor(rng() * rows.length)];
       lat = base.lat + (rng() - 0.5) * 0.002;
       lng = base.lng + (rng() - 0.5) * 0.002;
     }
@@ -69,7 +59,7 @@ function seedPotholes(count = 50): Pothole[] {
       confirmations = Math.floor(rng() * 3);
     }
 
-    items.push({
+    rows.push({
       id: `ph-${1000 + i}`,
       lat, lng, severity, status, confirmations,
       createdAt: new Date(now - ageMs).toISOString(),
@@ -79,7 +69,7 @@ function seedPotholes(count = 50): Pothole[] {
   }
 
   // Demo hotspot near center
-  items[0] = {
+  rows[0] = {
     id: "ph-demo-1",
     lat: MAP_CENTER.lat + 0.0003,
     lng: MAP_CENTER.lng + 0.0002,
@@ -91,18 +81,35 @@ function seedPotholes(count = 50): Pothole[] {
     neighborhood: "Civic Center",
   };
 
-  return items;
+  return rows;
 }
 
-const potholes: Pothole[] = seedPotholes();
+async function seedIfEmpty() {
+  const existing = await db.select({ id: potholesTable.id }).from(potholesTable).limit(1);
+  if (existing.length === 0) {
+    const rows = buildSeedRows(50);
+    await db.insert(potholesTable).values(rows);
+  }
+}
+
+// Seed on first load (non-blocking to avoid delaying startup)
+seedIfEmpty().catch((err) => {
+  console.error("Seeding failed:", err);
+});
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-router.get("/potholes", (_req, res) => {
-  res.json(potholes);
+router.get("/potholes", async (_req, res) => {
+  try {
+    const rows = await db.select().from(potholesTable);
+    res.json(rows.map(toApiShape));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch potholes" });
+  }
 });
 
-router.post("/potholes", (req, res) => {
+router.post("/potholes", async (req, res) => {
   const parsed = CreatePotholeBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.errors.map((e) => e.message).join(", ") });
@@ -111,49 +118,76 @@ router.post("/potholes", (req, res) => {
 
   const { lat, lng, severity, notes, streetName, neighborhood } = parsed.data;
 
-  // Reject clearly invalid coordinates (non-finite or off-world)
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     res.status(400).json({ error: "Coordinates out of valid range" });
     return;
   }
 
-  const pothole: Pothole = {
-    id: `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    lat,
-    lng,
-    severity,
-    status: "reported",
-    confirmations: 0,
-    createdAt: new Date().toISOString(),
-    streetName,
-    neighborhood,
-    notes,
-  };
+  const id = `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const createdAt = new Date().toISOString();
 
-  potholes.unshift(pothole);
-  res.status(201).json(pothole);
+  try {
+    const [row] = await db
+      .insert(potholesTable)
+      .values({ id, lat, lng, severity, status: "reported", confirmations: 0, createdAt, streetName, neighborhood, notes })
+      .returning();
+    res.status(201).json(toApiShape(row));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create pothole" });
+  }
 });
 
-router.post("/potholes/:id/confirm", (req, res) => {
+router.post("/potholes/:id/confirm", async (req, res) => {
   const { id } = req.params;
-  const pothole = potholes.find((p) => p.id === id);
 
-  if (!pothole) {
-    res.status(404).json({ error: "Pothole not found" });
-    return;
+  try {
+    const [pothole] = await db.select().from(potholesTable).where(eq(potholesTable.id, id));
+
+    if (!pothole) {
+      res.status(404).json({ error: "Pothole not found" });
+      return;
+    }
+
+    if (pothole.status === "fixed") {
+      res.status(400).json({ error: "Cannot confirm a pothole that has already been fixed" });
+      return;
+    }
+
+    const newConfirmations = pothole.confirmations + 1;
+    const newStatus: Status =
+      pothole.status === "reported" && newConfirmations >= 3
+        ? "confirmed"
+        : (pothole.status as Status);
+
+    const [updated] = await db
+      .update(potholesTable)
+      .set({ confirmations: newConfirmations, status: newStatus })
+      .where(eq(potholesTable.id, id))
+      .returning();
+
+    res.json(toApiShape(updated));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to confirm pothole" });
   }
-
-  if (pothole.status === "fixed") {
-    res.status(400).json({ error: "Cannot confirm a pothole that has already been fixed" });
-    return;
-  }
-
-  pothole.confirmations += 1;
-  if (pothole.status === "reported" && pothole.confirmations >= 3) {
-    pothole.status = "confirmed";
-  }
-
-  res.json(pothole);
 });
+
+// ─── Shape mapper ─────────────────────────────────────────────────────────────
+
+function toApiShape(row: typeof potholesTable.$inferSelect) {
+  return {
+    id: row.id,
+    lat: row.lat,
+    lng: row.lng,
+    severity: row.severity,
+    status: row.status,
+    confirmations: row.confirmations,
+    createdAt: row.createdAt,
+    streetName: row.streetName,
+    neighborhood: row.neighborhood,
+    ...(row.notes != null ? { notes: row.notes } : {}),
+  };
+}
 
 export default router;
