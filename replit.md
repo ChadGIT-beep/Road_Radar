@@ -7,6 +7,7 @@ A mobile-first civic-tech pothole reporting app. Community members can see road 
 - `pnpm --filter @workspace/pothole-reporter run dev` — run the web app (port 21017, preview path `/`)
 - `VITE_MAP_STYLE_URL=/offline-style.json pnpm --filter @workspace/pothole-reporter run dev` — run against the bundled blank style, for offline/air-gapped work
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080, preview path `/api`)
+- `CORS_ALLOWED_ORIGINS=https://example.com,...` — origins allowed to call the API from a browser in production. Unset is fine while web and API share one origin; only a separately hosted front end needs it
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
@@ -37,6 +38,7 @@ A mobile-first civic-tech pothole reporting app. Community members can see road 
   - `lib/types.ts` — shared types + haversine distance helper
   - `lib/utils/ui-helpers.ts` — severity colour helpers
 - `artifacts/api-server/src/` — Express API server (health + full pothole CRUD/confirm routes)
+  - `lib/cors.ts` — CORS allowlist policy (`CORS_ALLOWED_ORIGINS`)
 - `lib/api-spec/openapi.yaml` — OpenAPI contract
 - `artifacts/patchwork-mobile/` — Expo/React Native client (real GPS, MapLibre, wired to the API)
   - `app/(tabs)/index.tsx` — map screen
@@ -51,6 +53,7 @@ A mobile-first civic-tech pothole reporting app. Community members can see road 
 - **Mock data is seeded deterministically** (see `lib/mock-data.ts`) and persisted to `localStorage` under `patchwork.potholes.v1`, so reports and confirmations survive a reload. Unreadable or malformed storage falls back to a fresh seed. The seed is generated around the user's *real* position on first run, so the demo is never empty outside San Francisco. ph-demo-1 sits ~38m away to demonstrate the duplicate nudge on first open.
 - **The web app is still localStorage-only.** The API server implements `GET/POST /api/potholes` and `POST /api/potholes/:id/confirm`, and `patchwork-mobile` already consumes them via `@workspace/api-client-react` — but `pothole-reporter` does not. Until it does, the two clients show different data and the web heatmap reflects only that browser.
 - **No database writes yet** — designed for future expansion with the API server + Drizzle schema.
+- **CORS is allowlisted in production, open in development** (`api-server/src/lib/cors.ts`). Requests with no `Origin` — native mobile, curl, server-to-server — always pass, because CORS is a browser mechanism and protects nothing there. An unconfigured production deploy still works: web and API sit on one origin behind Replit's router, and same-origin requests never consult CORS. `credentials` stays off deliberately; the mobile client authenticates with a bearer token, and reflecting an origin with credentials enabled is how CORS mistakes become account takeover. Note this constrains browsers only — it does nothing about the unauthenticated write routes (see `GO-LIVE.md`).
 
 ## Product
 

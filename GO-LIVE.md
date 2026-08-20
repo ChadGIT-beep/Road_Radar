@@ -16,6 +16,8 @@ Everything below was verified against the running app, not inferred.
 
 ## Blockers — must land before real users
 
+(#4 is done on this branch; the rest are open.)
+
 ### 1. The web app is single-player
 
 `pothole-reporter` reads and writes `localStorage` only
@@ -54,10 +56,31 @@ Minimum: identity (even anonymous device tokens), per-device rate limits,
 one-confirm-per-device-per-pothole, and move the distance check server-side by
 sending the confirmer's coordinates with the request.
 
-### 4. CORS is fully open
+### 4. CORS is fully open — ~~blocker~~ **done**
 
-`app.use(cors())` in `api-server/src/app.ts` accepts every origin. Pin it to the
-deployed web origin before the API is public.
+`app.use(cors())` accepted every origin. The policy now lives in
+`api-server/src/lib/cors.ts`:
+
+- requests with no `Origin` (native mobile, curl, server-to-server) pass — CORS
+  is a browser mechanism and has nothing to protect there;
+- in development any origin is reflected, so the Vite dev server just works;
+- in production only origins on the allowlist get CORS headers back.
+
+The allowlist is `CORS_ALLOWED_ORIGINS` (comma-separated) plus Replit's own
+`REPLIT_DEV_DOMAIN` / `REPLIT_DOMAINS` when the platform supplies them. An
+unconfigured production deploy is not a startup failure: web and API share one
+origin behind Replit's router, and same-origin requests never consult CORS. A
+*separately hosted* front end has to be named explicitly. Rejected origins are
+logged once each, so a misconfigured allowlist shows up in the server log rather
+than only as an opaque error in someone's browser console.
+
+Two things this deliberately does not do: enable `credentials` (reflecting an
+origin with credentials on is how CORS mistakes become account takeover — the
+mobile client uses a bearer token instead), and allow methods beyond
+`GET`/`POST`/`OPTIONS`, which is all the OpenAPI contract has.
+
+Note that CORS only constrains *browsers*. It does nothing about #3 — a direct
+API client is unaffected — so it narrows the attack surface without closing it.
 
 ## Should fix before launch
 
